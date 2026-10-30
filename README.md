@@ -120,61 +120,61 @@ When a developer inputs an unfamiliar SaaS application or direct documentation U
 sequenceDiagram
     autonumber
     actor Dev as Developer UI
-    participant API as /api/research
-    participant Orch as Orchestrator (pipeline.ts)
-    participant Disc as Discovery Agent (search.ts)
-    participant Ext as Extraction Agent (html-parser.ts)
-    participant AI as Synthesis Agent (gemini.ts)
-    participant Val as Evidence Auditor (evidence-validator.ts)
-    participant DB as Neon Postgres DB
+    participant API as API Route
+    participant Orch as Orchestrator
+    participant Disc as Discovery Agent
+    participant Ext as Extraction Agent
+    participant AI as Synthesis Agent
+    participant Val as Evidence Auditor
+    participant DB as Postgres DB
 
-    Dev->>API: POST /api/research { input: "Linear" }
-    API->>DB: Create ResearchRun (status: "running")
-    API-->>Dev: Return HTTP 202 { runId }
+    Dev->>API: POST /api/research with target app
+    API->>DB: Create ResearchRun (status: running)
+    API-->>Dev: Return HTTP 202 with runId
     
     Note over Dev,API: UI polls GET /api/research/:runId every 1.5s
 
-    API-)Orch: runResearchPipeline(runId, "Linear")
+    API->>Orch: Trigger asynchronous research pipeline
     
     rect rgb(240, 248, 255)
     Note over Orch,Disc: STAGE 1: Discovering Documentation
-    Orch->>Disc: searchDocumentation("Linear")
-    Disc-->>Orch: Discovered 3 official doc URLs
+    Orch->>Disc: Search documentation for target app
+    Disc-->>Orch: Discovered 3 official documentation URLs
     Orch->>DB: Update Stage 1: completed
     end
 
     rect rgb(254, 249, 231)
     Note over Orch,Ext: STAGE 2: Extracting Requirements
-    Orch->>Ext: safeFetch() + parse HTML for top URLs (capped 8KB/page)
-    Ext-->>Orch: Cleaned text & OAuth endpoints
+    Orch->>Ext: safeFetch and parse HTML for top URLs
+    Ext-->>Orch: Cleaned text and OAuth endpoints
     Orch->>DB: Update Stage 2: completed
     end
 
     rect rgb(243, 232, 255)
-    Note over Orch,AI: STAGE 3: Investigating Approval & Readiness
-    Orch->>AI: callGeminiStructured(userPrompt, systemPrompt)
-    AI->>AI: Model chain fallback (75s timeout)
+    Note over Orch,AI: STAGE 3: Investigating Approval and Readiness
+    Orch->>AI: callGeminiStructured with guide schema
+    AI->>AI: Model chain fallback with 75s timeout
     AI-->>Orch: Structured 18-field OAuth Atlas guide
     Orch->>DB: Update Stage 3: completed
     end
 
     rect rgb(236, 253, 245)
     Note over Orch,Val: STAGE 4: Validating Evidence
-    Orch->>Val: validateClaimsAgainstSources(claims, fetchedDocs)
-    Val->>Val: String normalization & substring verification
-    Val-->>Orch: Verified quotes; unverified marked "UNSPECIFIED IN DOCS"
+    Orch->>Val: Validate claims and quotes against source text
+    Val->>Val: Text normalization and substring verification
+    Val-->>Orch: Verified quotes and downgraded unverified claims
     Orch->>DB: Update Stage 4: completed
     end
 
     rect rgb(240, 253, 244)
-    Note over Orch,DB: STAGE 5: Generating Structured Guide & Persisting
-    Orch->>DB: saveGuide(guide) + mark ResearchRun "completed"
-    Orch->>DB: Update Stage 5: completed (slug: "linear")
+    Note over Orch,DB: STAGE 5: Generating Structured Guide and Persisting
+    Orch->>DB: saveGuide and mark run as completed
+    Orch->>DB: Update Stage 5: completed
     end
 
     Dev->>API: Poll GET /api/research/:runId
-    API-->>Dev: { status: "completed", generated_slug: "linear" }
-    Dev->>Dev: Redirects user to /guides/linear
+    API-->>Dev: Status completed with generated slug
+    Dev->>Dev: Redirects user to /guides/:slug
 ```
 
 ### 6.3 Resiliency & Zero-Crash Safeguards
