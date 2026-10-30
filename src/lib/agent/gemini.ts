@@ -15,7 +15,7 @@ const FALLBACK_MODELS = [
   "gemini-3.8-flash",
 ];
 
-function makeHttpsPost(url: string, payload: string, timeoutMs = 25000): Promise<{ status: number; body: string }> {
+function makeHttpsPost(url: string, payload: string, timeoutMs = 75000): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const req = https.request(
       url,
@@ -123,8 +123,14 @@ export async function callGeminiStructured<T>(
       }
       throw new GeminiError(`Gemini API error (HTTP ${status}): ${parsedMessage}`, status);
     } catch (err) {
-      if (err instanceof GeminiError && (err.statusCode === 404 || err.statusCode === 503)) {
-        lastError = err;
+      const errMsg = (err as Error)?.message || "";
+      if (
+        (err instanceof GeminiError && (err.statusCode === 404 || err.statusCode === 503)) ||
+        errMsg.includes("timed out") ||
+        errMsg.includes("network request failed")
+      ) {
+        console.warn(`Gemini model "${model}" encountered error (${errMsg}). Trying next model in fallback chain...`);
+        lastError = err as Error;
         continue;
       }
       throw err;
