@@ -1,3 +1,4 @@
+import https from "node:https";
 import { Guide, GuideSchema } from "@/types/guide";
 
 export class GeminiError extends Error {
@@ -7,21 +8,61 @@ export class GeminiError extends Error {
   }
 }
 
-const DEFAULT_MODEL = "gemini-2.5-flash";
+const FALLBACK_MODELS = [
+  "gemini-flash-lite-latest",
+  "gemini-3.5-flash",
+  "gemini-flash-latest",
+  "gemini-3.8-flash",
+];
+
+function makeHttpsPost(url: string, payload: string, timeoutMs = 25000): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      url,
+      {
+        method: "POST",
+        family: 4,
+        timeout: timeoutMs,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+        },
+      },
+      (res) => {
+        let body = "";
+        res.on("data", (chunk) => (body += chunk));
+        res.on("end", () => resolve({ status: res.statusCode || 500, body }));
+      }
+    );
+
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new GeminiError(`Gemini API request timed out after ${timeoutMs / 1000} seconds.`));
+    });
+
+    req.on("error", (err) => {
+      reject(new GeminiError(`Gemini request failed: ${err.message}`));
+    });
+
+    req.write(payload);
+    req.end();
+  });
+}
 
 export async function callGeminiStructured<T>(
   prompt: string,
-  systemInstruction?: string
+  systemInstruction?: string,
+  modelOverride?: string
 ): Promise<T> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new GeminiError("GEMINI_API_KEY is not configured in environment variables.");
   }
 
-  const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const requestedModel = modelOverride || process.env.GEMINI_MODEL || "gemini-flash-lite-latest";
+  const modelChain = Array.from(new Set([requestedModel, ...FALLBACK_MODELS]));
 
-  const body: Record<string, unknown> = {
+  const payloadObj: Record<string, unknown> = {
     contents: [
       {
         role: "user",
@@ -35,58 +76,62 @@ export async function callGeminiStructured<T>(
   };
 
   if (systemInstruction) {
-    body.system_instruction = {
+    payloadObj.system_instruction = {
       parts: [{ text: systemInstruction }],
     };
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45000); // 45s limit
+  const jsonPayload = JSON.stringify(payloadObj);
+  let lastError: Error | null = null;
 
-  try {
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
+  for (const model of modelChain) {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-    clearTimeout(timeout);
+    try {
+      const { status, body } = await makeHttpsPost(endpoint, jsonPayload);
 
-    if (!res.ok) {
-      const errText = await res.text();
-      let parsedMessage = errText;
+      if (status === 200) {
+        const json = JSON.parse(body);
+        const candidate = json.candidates?.[0];
+        const textPart = candidate?.content?.parts?.[0]?.text;
+
+        if (!textPart) {
+          throw new GeminiError("Gemini returned an empty response candidate.");
+        }
+
+        try {
+          return JSON.parse(textPart) as T;
+        } catch (err) {
+          throw new GeminiError(`Failed to parse Gemini response as JSON: ${(err as Error).message}`);
+        }
+      }
+
+      // If model is deprecated (404) or busy (503), try next model in chain
+      if (status === 404 || status === 503) {
+        console.warn(`Gemini model "${model}" returned HTTP ${status}. Attempting next model...`);
+        lastError = new GeminiError(`Gemini model ${model} unavailable (HTTP ${status})`, status);
+        continue;
+      }
+
+      // For other client or auth errors (e.g., 400, 401, 403), parse message and throw immediately
+      let parsedMessage = body;
       try {
-        const json = JSON.parse(errText);
-        parsedMessage = json.error?.message || errText;
+        const errJson = JSON.parse(body);
+        parsedMessage = errJson.error?.message || body;
       } catch {
         // ignore
       }
-      throw new GeminiError(`Gemini API error (HTTP ${res.status}): ${parsedMessage}`, res.status);
-    }
-
-    const json = await res.json();
-    const candidate = json.candidates?.[0];
-    const textPart = candidate?.content?.parts?.[0]?.text;
-
-    if (!textPart) {
-      throw new GeminiError("Gemini returned an empty response candidate.");
-    }
-
-    try {
-      const parsed = JSON.parse(textPart);
-      return parsed as T;
+      throw new GeminiError(`Gemini API error (HTTP ${status}): ${parsedMessage}`, status);
     } catch (err) {
-      throw new GeminiError(`Failed to parse Gemini response as JSON: ${(err as Error).message}`);
+      if (err instanceof GeminiError && (err.statusCode === 404 || err.statusCode === 503)) {
+        lastError = err;
+        continue;
+      }
+      throw err;
     }
-  } catch (err: unknown) {
-    clearTimeout(timeout);
-    if (err instanceof GeminiError) throw err;
-    if ((err as Error).name === "AbortError") {
-      throw new GeminiError("Gemini API request timed out after 45 seconds.");
-    }
-    throw new GeminiError(`Gemini request failed: ${(err as Error).message}`);
   }
+
+  throw lastError || new GeminiError("All available Gemini models in fallback chain were exhausted.");
 }
 
 export function validateGuideResponse(data: unknown): Guide {
