@@ -1,4 +1,8 @@
 import { safeFetch } from "@/lib/security/ssrf";
+import { execFile } from "child_process";
+import { promisify } from "util";
+
+const execFileAsync = promisify(execFile);
 
 export interface SearchResult {
   title: string;
@@ -85,15 +89,50 @@ export async function searchDocumentation(
             url: r.url,
             snippet: r.content,
           }));
-          return { results, providerUsed: "tavily" };
+          return { results, providerUsed: "tavily_api" };
         }
       }
     } catch (err) {
-      console.warn("Tavily search failed, falling back:", err);
+      console.warn("Tavily search API failed, falling back:", err);
     }
   }
 
-  // 3. Known developer portal fallback
+  // 3. Authenticated Tavily CLI fallback
+  try {
+    const isWindows = process.platform === "win32";
+    const tvlyCmd = isWindows ? "tvly.exe" : "tvly";
+    
+    const { stdout } = await execFileAsync(tvlyCmd, [
+      "search",
+      `${trimmed} developer oauth 2.0 documentation scopes app review`,
+      "--json",
+    ], {
+      timeout: 15000,
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: "utf-8",
+        PYTHONUTF8: "1",
+      },
+    });
+
+    // Clean any leading warning lines
+    const jsonStart = stdout.indexOf("{");
+    if (jsonStart !== -1) {
+      const data = JSON.parse(stdout.slice(jsonStart));
+      if (data.results && Array.isArray(data.results) && data.results.length > 0) {
+        const results: SearchResult[] = data.results.map((r: { title: string; url: string; content?: string }) => ({
+          title: r.title,
+          url: r.url,
+          snippet: r.content,
+        }));
+        return { results, providerUsed: "tavily_cli" };
+      }
+    }
+  } catch {
+    // Continue to known portals and web search
+  }
+
+  // 4. Known developer portal fallback
   const lookupKey = trimmed.toLowerCase().replace(/[^a-z0-9]/g, "");
   if (KNOWN_DEV_PORTALS[lookupKey]) {
     const known = KNOWN_DEV_PORTALS[lookupKey];
