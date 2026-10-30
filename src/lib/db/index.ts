@@ -8,6 +8,28 @@ const DATA_DIR = path.join(process.cwd(), ".data");
 const LOCAL_GUIDES_FILE = path.join(DATA_DIR, "guides.json");
 const LOCAL_RUNS_FILE = path.join(DATA_DIR, "research_runs.json");
 
+// Load .env.local if running in standalone script
+function loadEnvLocal() {
+  if (!process.env.DATABASE_URL) {
+    const envPath = path.join(process.cwd(), ".env.local");
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, "utf-8");
+      for (const line of content.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith("#") && trimmed.includes("=")) {
+          const idx = trimmed.indexOf("=");
+          const key = trimmed.slice(0, idx).trim();
+          const val = trimmed.slice(idx + 1).trim().replace(/^["']|["']$/g, "");
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
+      }
+    }
+  }
+}
+loadEnvLocal();
+
 // In-memory cache for fast lookups
 const memoryGuides = new Map<string, Guide>();
 const memoryRuns = new Map<string, ResearchRun>();

@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { notFound } from "next/navigation";
 import { getGuideBySlug, getAllGuides } from "@/lib/db";
 import { GuideDetailClient } from "@/components/GuideDetailClient";
@@ -6,11 +8,6 @@ import { Compass, Sparkles } from "lucide-react";
 
 interface Props {
   params: Promise<{ slug: string }>;
-}
-
-export async function generateStaticParams() {
-  const guides = await getAllGuides();
-  return guides.map((g) => ({ slug: g.slug }));
 }
 
 export default async function GuidePage({ params }: Props) {

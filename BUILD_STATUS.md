@@ -59,6 +59,14 @@ OAuth Atlas is an AI-powered OAuth Setup and Approval Readiness Platform that an
   - [x] Honest failure handling: reports missing API keys and errors clearly without fake animations.
 
 - [x] **Block 4: Verification, Automated Testing & Documentation**
+  - [x] Provisioned and wired official Neon Backend Primitives:
+    - Lakebase Postgres (`DATABASE_URL`, connection pooler active)
+    - Neon Functions (`hello` function deployed and callable)
+    - Neon Object Storage (`assets` S3-compatible bucket wired with `@aws-sdk/client-s3`)
+    - Neon Auth (Managed Better Auth / JWKS verified)
+    - Neon Realtime (`NEON_REALTIME_URL` configured)
+  - [x] Dedicated diagnostic API route at `/api/neon/status` testing all 5 services live
+  - [x] End-to-end service test suite (`npm run test:neon`) passing all checks
   - [x] Automated test runner (`tests/runner.ts`) passing all 44 tests:
     - Test 1: Directory & Prebuilt Guides (5 tests)
     - Test 2: Guide Detail Pages & Badges (8 tests)
